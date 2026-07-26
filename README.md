@@ -1,2 +1,2 @@
 # Compound-Flood-Forecasting
-The data and source code used in this study are publicly available at \url{https://github.com/YljyLjylJ125/Water-Quality-Forecasting.git}.
+ESL is a spatiotemporal forecasting framework that leverages multi-site hydrological and operational observations to predict water-level dynamics and high-water events.
