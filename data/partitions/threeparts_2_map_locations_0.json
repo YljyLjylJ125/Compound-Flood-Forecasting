@@ -1,0 +1,19 @@
+{
+    "WATER": [
+        "CORK",
+        "BCYPR7",
+        "GOLD.951",
+        "COCOH.95_H"
+    ],
+    "WELL": [],
+    "RAIN": [
+        "LEHIGH 1_R",
+        "L.B.MINO_R",
+        "ALVA FAR_R",
+        "COLLIER_R",
+        "LEHIGH W_R",
+        "CORK.HQ_R"
+    ],
+    "PUMP": [],
+    "GATE": []
+}

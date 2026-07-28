@@ -1,0 +1,45 @@
+{
+    "WATER": [
+        "WF2_H",
+        "FU4_H",
+        "6MI.DR.T_T",
+        "951EXT",
+        "WF1_H",
+        "CORK",
+        "KEAIS858",
+        "HF4_H",
+        "BCYPR7",
+        "ST3_H",
+        "COCOH.95_H",
+        "WF7_H",
+        "HF3_H",
+        "ST1_H",
+        "HF2_H"
+    ],
+    "WELL": [
+        "HF4",
+        "LUCKW_GW",
+        "HF3",
+        "WF7",
+        "ST3",
+        "LUCKE_GW",
+        "FT.DENAUDE",
+        "HF2",
+        "FTDN-S",
+        "WF10",
+        "WF1"
+    ],
+    "RAIN": [
+        "951EXT_R",
+        "COLLIER_R",
+        "CORK.HQ_R",
+        "CORK_R",
+        "LEHIGH W_R",
+        "ALVA FAR_R",
+        "GOLDFS2"
+    ],
+    "PUMP": [],
+    "GATE": [
+        "HC1_C"
+    ]
+}
