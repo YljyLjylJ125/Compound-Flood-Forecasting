@@ -35,7 +35,7 @@ def load_runs(artifact_root: Path) -> pd.DataFrame:
     if not frames:
         raise FileNotFoundError(f"No run_metrics.csv files found under {artifact_root}")
     runs = pd.concat(frames, ignore_index=True)
-    key = ["variant", "split", "part", "seed", "horizon", "q"]
+    key = ["variant", "split", "part", "repeat_id", "horizon", "q"]
     duplicate = runs.duplicated(key, keep=False)
     if duplicate.any():
         raise ValueError(f"Duplicate run keys:\n{runs.loc[duplicate, key].to_string(index=False)}")
@@ -43,7 +43,7 @@ def load_runs(artifact_root: Path) -> pd.DataFrame:
 
 
 def long_metrics(runs: pd.DataFrame) -> pd.DataFrame:
-    identifiers = ["model", "variant", "split", "part", "seed", "horizon", "q", "artifact_dir"]
+    identifiers = ["model", "variant", "split", "part", "repeat_id", "horizon", "q", "artifact_dir"]
     return runs.melt(
         id_vars=identifiers,
         value_vars=list(METRICS),
@@ -53,16 +53,16 @@ def long_metrics(runs: pd.DataFrame) -> pd.DataFrame:
 
 
 def split_results(runs: pd.DataFrame) -> pd.DataFrame:
-    """Average release seeds per part, then summarize the three official parts."""
+    """Average repeated experiments per part, then summarize the official parts."""
 
     per_part = (
         long_metrics(runs)
         .groupby(["variant", "split", "part", "horizon", "q", "metric"], dropna=False)["value"]
-        .agg(seed_mean="mean", n_seeds="count")
+        .agg(repeat_mean="mean", n_repeats="count")
         .reset_index()
     )
     result = (
-        per_part.groupby(["variant", "split", "horizon", "q", "metric"], dropna=False)["seed_mean"]
+        per_part.groupby(["variant", "split", "horizon", "q", "metric"], dropna=False)["repeat_mean"]
         .agg(mean_raw="mean", std_across_parts_raw=lambda values: values.std(ddof=0), n_parts="count")
         .reset_index()
     )

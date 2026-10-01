@@ -22,7 +22,7 @@ def test_paper_matrix_matches_manuscript_surface():
     assert {run.model for run in runs if run.suite == "main"} == set(PAPER_MODELS)
     assert {run.model for run in runs if run.suite == "architecture_ablation"} == set(ARCHITECTURE_ABLATIONS)
     assert {run.model for run in runs if run.suite == "source_ablation"} == set(SOURCE_ABLATIONS)
-    assert {run.seed for run in runs} == {42, 43, 44}
+    assert len({run.relative_dir for run in runs}) == len(runs)
 
     for run in runs:
         if run.suite != "main":
@@ -30,9 +30,9 @@ def test_paper_matrix_matches_manuscript_surface():
             assert run.horizon == "3D"
 
 
-def test_restricted_matrix_preserves_requested_parts_and_seeds():
-    runs = paper_matrix(splits=("S_6",), parts=(2,), seeds=(44,))
+def test_restricted_matrix_preserves_requested_parts_and_repeats():
+    runs = paper_matrix(splits=("S_6",), parts=(2,), repeat_ids=(3,))
     assert len(runs) == len(PAPER_MODELS) * 4
     assert {run.split for run in runs} == {"S_6"}
     assert {run.part for run in runs} == {2}
-    assert {run.seed for run in runs} == {44}
+    assert {run.repeat_id for run in runs} == {3}

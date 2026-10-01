@@ -32,7 +32,7 @@ def parse_run(path: Path) -> dict[str, object]:
         "model": pieces[h_index - 4],
         "split": pieces[h_index - 3],
         "part": int(pieces[h_index - 2].split("_")[1]),
-        "seed": int(pieces[h_index - 1].split("_")[1]),
+        "repeat_id": int(pieces[h_index - 1].split("_")[1]),
         "horizon": int(pieces[h_index][1:]),
     }
 
@@ -40,18 +40,18 @@ def parse_run(path: Path) -> dict[str, object]:
 def aggregate_thresholds(raw: pd.DataFrame) -> pd.DataFrame:
     metrics = ("episode_f1", "onset_mae", "peak_mae", "duration_mae")
     long = raw.melt(
-        id_vars=["model", "split", "part", "seed", "horizon", "q"],
+        id_vars=["model", "split", "part", "repeat_id", "horizon", "q"],
         value_vars=list(metrics),
         var_name="metric",
         value_name="value",
     )
     per_part = (
         long.groupby(["model", "split", "part", "horizon", "q", "metric"], dropna=False)["value"]
-        .agg(seed_mean="mean", n_seeds="count")
+        .agg(repeat_mean="mean", n_repeats="count")
         .reset_index()
     )
     return (
-        per_part.groupby(["model", "split", "horizon", "q", "metric"], dropna=False)["seed_mean"]
+        per_part.groupby(["model", "split", "horizon", "q", "metric"], dropna=False)["repeat_mean"]
         .agg(mean_across_parts="mean", std_across_parts=lambda values: values.std(ddof=0), n_parts="count")
         .reset_index()
     )
@@ -66,7 +66,7 @@ def main() -> None:
 
     rows: list[dict[str, object]] = []
     data_cache: dict[int, SFBenchDataModule] = {}
-    for path in sorted(args.artifact_root.glob("*/S_7/part_*/seed_*/h72/test_predictions.npz")):
+    for path in sorted(args.artifact_root.glob("*/S_7/part_*/repeat_*/h72/test_predictions.npz")):
         metadata = parse_run(path)
         if metadata["model"] not in PAPER_MODELS:
             continue
@@ -110,7 +110,7 @@ def main() -> None:
             f"{args.artifact_root}"
         )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    raw = pd.DataFrame(rows).sort_values(["model", "part", "seed", "q"])
+    raw = pd.DataFrame(rows).sort_values(["model", "part", "repeat_id", "q"])
     raw.to_csv(args.output_dir / "threshold_sensitivity_raw.csv", index=False)
     aggregate_thresholds(raw).to_csv(
         args.output_dir / "table_11_threshold_sensitivity.csv",

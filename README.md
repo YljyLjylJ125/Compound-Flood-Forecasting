@@ -49,7 +49,7 @@ See [docs/DATA.md](docs/DATA.md) for column semantics and split dates.
 The shared training script supports the proposed model, baselines, and
 ablation variants under the paper protocol. Each run specifies a dataset
 root, output directory, model, chronological split, spatial partition,
-random seed, and forecast horizon.
+repeat identifier, and forecast horizon.
 
 The output contains the lowest-validation-MSE checkpoint, training history,
 original-unit predictions, run-level metrics, and episode match records.
@@ -75,4 +75,3 @@ in the paper.
 - Main high-water thresholds are station-specific training `q=0.95` quantiles.
 - Episodes require three exceedance hours and merge gaps of at most six hours.
 - Forecast issues are sampled every 24 hours for episode evaluation.
-

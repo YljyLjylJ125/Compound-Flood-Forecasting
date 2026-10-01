@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from posthoc import aggregate_thresholds  # noqa: E402
+from posthoc import aggregate_thresholds, parse_run  # noqa: E402
 from summarize import METRICS, ablation_results, main_results, split_results  # noqa: E402
 
 
@@ -17,14 +17,14 @@ def sample_runs() -> pd.DataFrame:
         splits = ("S7",) if variant not in {"ours", "patchtst"} else ("S5", "S6", "S7")
         for split_index, split in enumerate(splits):
             for part in (0, 1, 2):
-                for seed in (42, 43, 44):
-                    base = 1.0 + variant_index + split_index / 10 + part / 100 + seed / 10000
+                for repeat_id in (1, 2, 3):
+                    base = 1.0 + variant_index + split_index / 10 + part / 100 + repeat_id / 10000
                     row = {
                         "model": variant,
                         "variant": variant,
                         "split": split,
                         "part": part,
-                        "seed": seed,
+                        "repeat_id": repeat_id,
                         "horizon": 72,
                         "q": 0.95,
                         "artifact_dir": "unused",
@@ -36,7 +36,7 @@ def sample_runs() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_paper_aggregation_averages_seeds_then_spatial_parts():
+def test_paper_aggregation_averages_repeats_then_spatial_parts():
     split = split_results(sample_runs())
     assert set(split["n_parts"]) == {3}
     ours_s7_mae = split[
@@ -60,15 +60,15 @@ def test_ablation_degradation_uses_metric_direction():
     assert fixed_f1["relative_degradation_pct"] > 0
 
 
-def test_threshold_table_averages_seeds_within_each_part():
+def test_threshold_table_averages_repeats_within_each_part():
     rows = []
     for part in (0, 1, 2):
-        for seed in (42, 43, 44):
+        for repeat_id in (1, 2, 3):
             rows.append({
                 "model": "ours",
                 "split": "S_7",
                 "part": part,
-                "seed": seed,
+                "repeat_id": repeat_id,
                 "horizon": 72,
                 "q": 0.95,
                 "episode_f1": 0.8 + part / 100,
@@ -79,3 +79,11 @@ def test_threshold_table_averages_seeds_within_each_part():
     table = aggregate_thresholds(pd.DataFrame(rows))
     assert set(table["n_parts"]) == {3}
     assert len(table) == 4
+
+
+def test_threshold_archive_path_identifies_repeat():
+    path = Path("artifacts/ours/S_7/part_2/repeat_3/h72/test_predictions.npz")
+    assert parse_run(path) == {
+        "model": "ours", "split": "S_7", "part": 2,
+        "repeat_id": 3, "horizon": 72,
+    }

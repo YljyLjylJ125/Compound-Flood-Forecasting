@@ -33,26 +33,26 @@ class Run:
     model: str
     split: str
     part: int
-    seed: int
+    repeat_id: int
     horizon: str
 
     @property
     def relative_dir(self) -> Path:
         hours = {"1D": 24, "3D": 72, "5D": 120, "7D": 168}[self.horizon]
-        return Path(self.model) / self.split / f"part_{self.part}" / f"seed_{self.seed}" / f"h{hours}"
+        return Path(self.model) / self.split / f"part_{self.part}" / f"repeat_{self.repeat_id}" / f"h{hours}"
 
 
 def paper_matrix(
     splits: tuple[str, ...] = ("S_5", "S_6", "S_7"),
     parts: tuple[int, ...] = (0, 1, 2),
-    seeds: tuple[int, ...] = (42, 43, 44),
+    repeat_ids: tuple[int, ...] = (1, 2, 3),
 ) -> list[Run]:
     runs = [
-        Run("main", model, split, part, seed, horizon)
+        Run("main", model, split, part, repeat_id, horizon)
         for model in PAPER_MODELS
         for split in splits
         for part in parts
-        for seed in seeds
+        for repeat_id in repeat_ids
         for horizon in HORIZONS
     ]
     if "S_7" in splits:
@@ -61,10 +61,10 @@ def paper_matrix(
             ("source_ablation", SOURCE_ABLATIONS),
         ):
             runs.extend(
-                Run(suite, variant, "S_7", part, seed, "3D")
+                Run(suite, variant, "S_7", part, repeat_id, "3D")
                 for variant in variants
                 for part in parts
-                for seed in seeds
+                for repeat_id in repeat_ids
             )
     return runs
 
@@ -88,7 +88,7 @@ def execute(run: Run, args: argparse.Namespace) -> None:
     if complete(output) and not args.rerun:
         print(
             f"SKIP {run.model} {run.split} part={run.part} "
-            f"seed={run.seed} horizon={run.horizon}",
+            f"repeat={run.repeat_id} horizon={run.horizon}",
             flush=True,
         )
         return
@@ -100,7 +100,7 @@ def execute(run: Run, args: argparse.Namespace) -> None:
         "--model", run.model,
         "--split", run.split,
         "--part", str(run.part),
-        "--seed", str(run.seed),
+        "--repeat-id", str(run.repeat_id),
         "--horizon", run.horizon,
         "--epochs", "10",
         "--batch-size", "64",
@@ -110,7 +110,7 @@ def execute(run: Run, args: argparse.Namespace) -> None:
         command += ["--max-train-batches", "1", "--max-eval-batches", "1", "--epochs", "1"]
     print(
         f"RUN  {run.model} {run.split} part={run.part} "
-        f"seed={run.seed} horizon={run.horizon}",
+        f"repeat={run.repeat_id} horizon={run.horizon}",
         flush=True,
     )
     with (output / "run.log").open("a", encoding="utf-8") as log:
@@ -145,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", action="append", choices=PAPER_MODELS + ARCHITECTURE_ABLATIONS + SOURCE_ABLATIONS)
     parser.add_argument("--splits", nargs="+", choices=["S_5", "S_6", "S_7"], default=["S_5", "S_6", "S_7"])
     parser.add_argument("--parts", nargs="+", type=int, choices=[0, 1, 2], default=[0, 1, 2])
-    parser.add_argument("--seeds", nargs="+", type=int, default=[42, 43, 44])
+    parser.add_argument("--repeat-ids", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--max-runs", type=int, default=0)
     parser.add_argument("--fast-dev-run", action="store_true")
@@ -157,7 +157,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.artifact_root = args.artifact_root.resolve()
-    runs = paper_matrix(tuple(args.splits), tuple(args.parts), tuple(args.seeds))
+    runs = paper_matrix(tuple(args.splits), tuple(args.parts), tuple(args.repeat_ids))
     selected = [
         run for run in runs
         if (not args.suite or run.suite in args.suite)

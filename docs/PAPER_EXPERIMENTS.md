@@ -29,10 +29,10 @@ matrix without starting a job:
 python scripts/run_paper.py --list
 ```
 
-The submitted manuscript states that three random initializations were used
-but does not publish their IDs. The release uses 42, 43, and 44 and labels them
-as release seeds rather than recovered historical seeds. Every original-paper
-model, including Graph WaveNet, uses all three release seeds.
+Each experiment is run three times, with repeat identifiers 1, 2, and 3 used
+to distinguish output directories and run-level records. These identifiers
+only label runs; they do not control model initialization or data shuffling.
+Every model, including Graph WaveNet, uses all three repetitions.
 
 ## Run the original-paper experiments
 

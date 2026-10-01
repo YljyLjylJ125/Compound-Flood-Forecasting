@@ -293,7 +293,7 @@ def load_split_arrays(
     """Load one phase, using a local binary cache after CSV validation.
 
     A full experiment matrix otherwise reparses the same station CSV files for
-    every seed and model. The cache is stored beside the downloaded data (and
+    every repeated experiment and model. The cache is stored beside the downloaded data (and
     is therefore excluded from Git), keyed by split, phase, and spatial part.
     """
 

@@ -20,7 +20,6 @@ from anchored_forecaster.evaluation import (
     save_prediction_archive, write_rows,
 )
 from anchored_forecaster.metrics import masked_mse
-from anchored_forecaster.reproducibility import seed_everything
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:
@@ -54,7 +53,6 @@ def normalized_validation_mse(
 
 
 def train(args: argparse.Namespace) -> dict[str, object]:
-    seed_everything(args.seed)
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     data = SFBenchDataModule(
         args.dataset_root,
@@ -189,7 +187,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "variant": args.model,
         "split": args.split.replace("_", ""),
         "part": args.part,
-        "seed": args.seed,
+        "repeat_id": args.repeat_id,
         "horizon": data.train.horizon,
         "q": args.episode_quantile,
         "mae": test_metrics["mae"],
@@ -254,7 +252,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episode-issue-stride", default=24, type=int)
     parser.add_argument("--episode-min-duration", default=3, type=int)
     parser.add_argument("--episode-merge-gap", default=6, type=int)
-    parser.add_argument("--seed", default=2025, type=int)
+    parser.add_argument("--repeat-id", default=1, type=int, help="Identifier for this repeated experiment")
     parser.add_argument("--device", default="")
     parser.add_argument("--num-workers", default=0, type=int)
     parser.add_argument("--max-train-batches", default=None, type=int)

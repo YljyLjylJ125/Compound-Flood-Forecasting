@@ -5,20 +5,19 @@
 The initial repository contained the proposed model, a data loader, episode
 metrics, and single-model train/evaluate scripts. It did not contain baseline
 implementations, checkpoints, prediction archives, original experiment logs,
-the three seed IDs, environment metadata, or table-generation code. Therefore,
+environment metadata, or table-generation code. Therefore,
 the release distinguishes manuscript values from newly rerun values and never
 claims that a new run recovered an unavailable historical artifact.
 
-## Determinism
+## Runtime environment
 
-The trainer seeds Python, NumPy, CPU PyTorch, and all CUDA devices. cuDNN
-deterministic mode is enabled. GPU kernels can still differ across PyTorch,
-CUDA, and hardware versions; record those versions beside result artifacts.
+Results can differ across PyTorch, CUDA, and hardware versions; record those
+versions beside result artifacts.
 
 ## Aggregation
 
-Metrics are first calculated independently for every split/part/seed run. The
-paper table generator first averages the three release seeds within each
+Metrics are first calculated independently for every split/part/repeat run. The
+paper table generator first averages the three repeated experiments within each
 spatial part, then reports the mean and population standard deviation across
 Parts 0, 1, and 2. Main Tables 1--3 average the corresponding S5, S6, and S7
 split statistics, matching the hierarchy printed in the manuscript. Episode
@@ -36,8 +35,6 @@ does not silently relabel one as the other: `scripts/posthoc.py` follows the
 Figure 3 caption and Table 11 explanatory paragraph and labels newly computed
 threshold sensitivity as S7/3D.
 
-The three seed IDs are not disclosed in the manuscript. Release runs use 42,
-43, and 44 as reproduction seeds and do not claim to recover historical IDs.
-The upstream interpolation provenance is also unavailable with the processed
+The upstream interpolation provenance is unavailable with the processed
 dataset; the release reads `INTERPOLATED_VALUE` with the supplied confidence
 mask and does not claim a causal-interpolation audit pass.

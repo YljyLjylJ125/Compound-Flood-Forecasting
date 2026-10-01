@@ -15,7 +15,6 @@ import torch
 
 from anchored_forecaster import SFBenchDataModule, build_model
 from anchored_forecaster.evaluation import collect_predictions, evaluate_predictions, save_prediction_archive, write_rows
-from anchored_forecaster.reproducibility import seed_everything
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +33,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episode-issue-stride", default=24, type=int)
     parser.add_argument("--episode-min-duration", default=3, type=int)
     parser.add_argument("--episode-merge-gap", default=6, type=int)
-    parser.add_argument("--seed", default=2025, type=int)
     parser.add_argument("--device", default="")
     parser.add_argument("--num-workers", default=0, type=int)
     parser.add_argument("--max-eval-batches", default=None, type=int)
@@ -43,7 +41,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace) -> None:
-    seed_everything(args.seed)
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     data = SFBenchDataModule(
         args.dataset_root,
