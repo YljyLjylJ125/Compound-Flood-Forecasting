@@ -52,10 +52,13 @@ def kge(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = No
 
 
 def peak_magnitude_error(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
-    del mask
-    pred_peak = pred.max(dim=-1).values
-    target_peak = target.max(dim=-1).values
-    return torch.abs(pred_peak - target_peak).mean()
+    mask_t = _safe_mask(mask, target).bool()
+    valid_series = mask_t.any(dim=-1)
+    if not bool(valid_series.any()):
+        return torch.tensor(float("nan"), device=target.device)
+    pred_peak = pred.masked_fill(~mask_t, float("-inf")).max(dim=-1).values
+    target_peak = target.masked_fill(~mask_t, float("-inf")).max(dim=-1).values
+    return torch.abs(pred_peak[valid_series] - target_peak[valid_series]).mean()
 
 
 def event_detection_metrics(

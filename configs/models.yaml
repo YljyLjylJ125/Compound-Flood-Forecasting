@@ -1,0 +1,56 @@
+proposed:
+  hidden_dim: 64
+  dynamic_top_k: 20
+  dropout: 0.1
+
+nlinear:
+  centered_on_last_value: true
+patchtst:
+  encoder_layers: 3
+  hidden_dim: 128
+  heads: 16
+  patch_length: 16
+  stride: 8
+  revin: true
+  dropout: 0.2
+itransformer:
+  hidden_dim: 512
+  heads: 8
+  encoder_layers: 2
+  feedforward_dim: 2048
+  dropout: 0.1
+timesnet:
+  blocks: 2
+  dominant_periods: 5
+  model_dim: 32
+  feedforward_dim: 32
+  inception_kernels: 6
+  dropout: 0.1
+fouriergnn:
+  spectral_embedding: 256
+  hidden_dim: 512
+  complex_graph_stages: 3
+  sparsity_threshold: 0.01
+mtgnn:
+  layers: 3
+  learned_graph: true
+  node_embedding: 40
+  residual_channels: 32
+  skip_channels: 64
+  end_channels: 128
+  dropout: 0.3
+autotimes:
+  backbone: gpt2
+  frozen_backbone: true
+  token_length: 24
+  encoder_decoder_layers: 2
+  width: 256
+  dropout: 0.1
+graphwavenet:
+  adaptive_adjacency: true
+  blocks: 4
+  dilation_layers_per_block: 4
+  residual_channels: 32
+  skip_channels: 256
+  end_channels: 512
+  dropout: 0.3

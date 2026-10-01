@@ -1,0 +1,22 @@
+# Local SF2Bench data and downloaded archives
+/dataset.tar-1.gz
+/data/sf2bench/
+/data/SF2Bench/
+
+# Experiment artifacts and result exports are released separately
+/artifacts/
+/results/
+*.pt
+*.npz
+
+# Python/tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+.venv/
+venv/
+build/
+dist/
+*.egg-info/

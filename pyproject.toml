@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anchored-compound-flood-forecasting"
+version = "0.2.0"
+description = "Anchored dynamic-graph forecasting of high-water processes in managed coastal systems"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+  {name = "Liangjun You"},
+  {name = "Min Wu"},
+  {name = "Orlando Woods"},
+  {name = "Dongsheng Luo"},
+]
+dependencies = [
+  "numpy>=1.24,<2",
+  "pandas>=2.0,<3",
+  "PyYAML>=6.0,<7",
+  "torch>=2.0,<3",
+]
+
+[project.optional-dependencies]
+autotimes = ["transformers>=4.40,<5"]
+test = ["pytest>=7,<9"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

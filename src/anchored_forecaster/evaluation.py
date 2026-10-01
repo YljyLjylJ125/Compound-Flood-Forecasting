@@ -6,8 +6,10 @@ import csv
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 
 from .data import SFBenchDataModule
 from .metrics import evaluate_episode_windows, forecast_metrics, physical_error_metrics, station_thresholds
@@ -74,6 +76,26 @@ def evaluate_model(
         device,
         max_batches=max_batches,
     )
+    return evaluate_predictions(
+        predictions, targets, masks, data, quantile=quantile,
+        issue_stride=issue_stride, min_duration=min_duration,
+        merge_gap=merge_gap, dataset=dataset,
+    )
+
+
+def evaluate_predictions(
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    masks: torch.Tensor,
+    data: SFBenchDataModule,
+    quantile: float = 0.95,
+    issue_stride: int = 24,
+    min_duration: int = 3,
+    merge_gap: int = 6,
+    dataset=None,
+) -> tuple[dict[str, float], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """Evaluate already-collected original-unit predictions."""
+
     water_indices = data.metadata.water_indices
     thresholds = station_thresholds(
         data.train.values[water_indices].float(),
@@ -82,6 +104,10 @@ def evaluate_model(
     )
     names = water_station_names(data)
     record_metrics = forecast_metrics(predictions, targets, masks)
+    issue_times = None
+    if dataset is not None:
+        first_issue = dataset.lookback - 1
+        issue_times = [dataset.timestamps[first_issue + index].isoformat() for index in range(predictions.shape[0])]
     episode_metrics, episode_rows, station_episode_rows = evaluate_episode_windows(
         predictions,
         targets,
@@ -91,6 +117,7 @@ def evaluate_model(
         issue_stride=issue_stride,
         min_duration=min_duration,
         merge_gap=merge_gap,
+        issue_times=issue_times,
     )
     physical_metrics, physical_rows = physical_error_metrics(predictions, targets, masks, names)
     metrics = {
@@ -103,6 +130,35 @@ def evaluate_model(
         "episode_merge_gap_h": float(merge_gap),
     }
     return metrics, episode_rows, station_episode_rows, physical_rows
+
+
+def save_prediction_archive(
+    path: str | Path,
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    masks: torch.Tensor,
+    dataset,
+    issue_stride: int = 24,
+) -> None:
+    """Persist regularly spaced issues sufficient for all post-hoc analyses."""
+
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    issue_stride = max(1, int(issue_stride))
+    indices = np.arange(0, predictions.shape[0], issue_stride, dtype="int32")
+    first_issue = dataset.lookback - 1
+    issue_times = np.asarray(
+        [(dataset.timestamps[first_issue + int(index)]).isoformat() for index in indices]
+    )
+    np.savez_compressed(
+        output,
+        prediction=predictions[::issue_stride].detach().cpu().numpy().astype("float32"),
+        target=targets[::issue_stride].detach().cpu().numpy().astype("float32"),
+        mask=masks[::issue_stride].detach().cpu().numpy().astype("uint8"),
+        issue_index=indices,
+        issue_time=issue_times,
+        archive_issue_stride_h=np.asarray(issue_stride, dtype="int32"),
+    )
 
 
 def write_rows(path: str | Path, rows: list[dict[str, object]]) -> None:

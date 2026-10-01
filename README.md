@@ -1,32 +1,78 @@
-# Anchored Dynamic-Graph Forecasting for High-Water Processes
+# Multi-Source Dynamic Graph Forecasting
 
+Official code release for **Multi-Source Dynamic Graph Learning for
+Compound-Flood Forecasting in Managed Coastal Systems**. The task is
+multi-step WATER-stage forecasting: every issue uses the preceding 48 hourly
+observations and predicts the next 24, 72, 120, or 168 hours.
 
+The released protocol uses SF2Bench chronological splits `S_5`, `S_6`, and
+`S_7`, with three official spatial partitions per split. The model combines a
+target-only PatchTST anchor with a heterogeneous dynamic-graph residual whose
+magnitude is state- and lead-dependent and explicitly bounded.
 
-The model uses a pure PatchTST anchor based only on a target WATER station's history. An input-dependent graph then uses WATER, RAIN, WELL, PUMP, and GATE observations to construct an event-conditioned, lead-dependent bounded residual correction. Training uses masked MSE; high-water episode labels are used only for evaluation.
-
-```text
-src/anchored_forecaster/
-  data.py                 SFBench loader and training-only normalization
-  models.py               Proposed pure-PatchTST anchored dynamic-graph model
-  evaluation.py           Evaluation utilities
-  metrics/                Full-record and high-water episode metrics
-  reproducibility.py      Random-seed utility
-scripts/
-  train.py                Training and test evaluation
-  evaluate.py             Checkpoint evaluation
-data/partitions/          Official station-partition JSON files
-```
-
-Install Python 3.9+ with `torch`, `numpy`, and `pandas`. Download the processed SFBench/SF2Bench data from [DOI:10.7910/DVN/TU5UXE](https://doi.org/10.7910/DVN/TU5UXE). 
-
-Expected data layout:
+## Repository layout
 
 ```text
-<dataset-root>/Processed_hour/{WATER,RAIN,WELL,PUMP,GATE}/S_*/<station>/
+configs/                    Paper protocol and model configurations
+data/partitions/            Official three-part station maps
+docs/                       Data, model, and reproduction details
+scripts/download_data.py    Verified SF2Bench downloader
+scripts/train.py            Shared trainer for all models and variants
+scripts/evaluate.py         Checkpoint and prediction evaluation
+scripts/run_paper.py        Manuscript main-table and ablation matrix
+scripts/summarize.py        Tables 1--3, 8--10, and Figure 4 aggregation
+scripts/posthoc.py          Figure 3 / Table 11 threshold sensitivity
+src/anchored_forecaster/    Data, models, metrics, and evaluation code
+tests/                      Fast unit and contract tests
 ```
 
-Each station directory must contain a CSV with `TIMESTAMP`, `CONFIDENCE`, and `INTERPOLATED_VALUE`, plus its location JSON file. The official station-partition files needed for the `part=0/1/2` protocol are included under `data/partitions/`.
+## Installation
 
+Python 3.8+ and PyTorch 2.0+ are supported.
 
+Package dependencies and optional test dependencies are defined in
+`pyproject.toml`. The SF2Bench download script is provided in
+`scripts/download_data.py`.
 
-The script writes the selected checkpoint, full-record metrics, and episode-level results. The default episode threshold is the station-specific training-period $q=0.95$ quantile; it can be changed with `--episode-quantile` without changing training.
+The downloader retrieves Harvard Dataverse DOI
+`10.7910/DVN/TU5UXE`, verifies the published archive size and MD5 checksum,
+and extracts the expected layout:
+
+```text
+data/sf2bench/Processed_hour/{WATER,RAIN,WELL,PUMP,GATE}/S_*/<station>/
+```
+
+See [docs/DATA.md](docs/DATA.md) for column semantics and split dates.
+
+## Train and evaluate
+
+The shared training script supports the proposed model, baselines, and
+ablation variants under the paper protocol. Each run specifies a dataset
+root, output directory, model, chronological split, spatial partition,
+random seed, and forecast horizon.
+
+The output contains the lowest-validation-MSE checkpoint, training history,
+original-unit predictions, run-level metrics, and episode match records.
+The resumable manuscript matrix writes to `artifacts/paper_reproduction/` by
+default.
+
+The evaluation script assesses saved checkpoints using the same data
+boundaries, spatial partition, and forecast horizon as the corresponding
+training run.
+
+## Models and ablations
+
+The model registry includes all eight paper baselines (`NLinear`, `PatchTST`,
+`iTransformer`, `TimesNet`, `FourierGNN`, `MTGNN`, `AutoTimes`, and Graph
+WaveNet), the proposed model, and the source/architecture ablations reported
+in the paper. 
+
+## Evaluation contract
+
+- Normalization statistics and high-water thresholds use valid training data only.
+- Missing inputs are zeroed after normalization and accompanied by explicit masks.
+- WATER predictions are inverse-transformed before all reported metrics.
+- Main high-water thresholds are station-specific training `q=0.95` quantiles.
+- Episodes require three exceedance hours and merge gaps of at most six hours.
+- Forecast issues are sampled every 24 hours for episode evaluation.
+

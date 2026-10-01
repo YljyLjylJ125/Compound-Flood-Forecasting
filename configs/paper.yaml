@@ -1,0 +1,19 @@
+dataset_root: data/sf2bench
+splits: [S_5, S_6, S_7]
+parts: [0, 1, 2]
+lookback: 2D
+horizons: [1D, 3D, 5D, 7D]
+seeds: [42, 43, 44]
+optimizer: AdamW
+learning_rate: 0.001
+weight_decay: 0.00001
+epochs: 10
+batch_size: 64
+gradient_clip: 1.0
+normalized_clip: 20.0
+checkpoint_rule: lowest_validation_masked_mse_normalized
+episode:
+  quantile: 0.95
+  issue_stride_hours: 24
+  minimum_duration_hours: 3
+  merge_gap_hours: 6

@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the associated paper."
+title: "Anchored Dynamic-Graph Forecasting for High-Water Processes"
+type: software
+authors:
+  - family-names: You
+    given-names: Liangjun
+  - family-names: Wu
+    given-names: Min
+  - family-names: Woods
+    given-names: Orlando
+  - family-names: Luo
+    given-names: Dongsheng
+repository-code: "https://github.com/YljyLjylJ125/Compound-Flood-Forecasting"
+version: 0.2.0
+date-released: 2026-09-30
+preferred-citation:
+  type: conference-paper
+  title: "Multi-Source Dynamic Graph Learning for Compound-Flood Forecasting in Managed Coastal Systems"
+  authors:
+    - family-names: You
+      given-names: Liangjun
+    - family-names: Wu
+      given-names: Min
+    - family-names: Woods
+      given-names: Orlando
+    - family-names: Luo
+      given-names: Dongsheng
+  conference:
+    name: "ACM SIGKDD Conference on Knowledge Discovery and Data Mining"
+  year: 2027
+

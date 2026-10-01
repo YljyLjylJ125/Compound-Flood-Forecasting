@@ -37,6 +37,8 @@ class PatchTSTAnchor(nn.Module):
         self.stride = max(1, stride)
         self.num_patches = 1 + max(0, lookback - self.patch_len) // self.stride
         self.patch_encoder = nn.Linear(self.patch_len, hidden_dim)
+        self.positional_encoding = nn.Parameter(torch.zeros(1, self.num_patches, hidden_dim))
+        nn.init.trunc_normal_(self.positional_encoding, std=0.02)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=hidden_dim,
             nhead=nhead,
@@ -55,14 +57,19 @@ class PatchTSTAnchor(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, x_mask: torch.Tensor | None = None) -> torch.Tensor:
-        del x_mask
         water = x[:, : self.num_water_nodes, :]
-        last = water[:, :, -1:]
-        centered = water - last
+        water_mask = torch.ones_like(water) if x_mask is None else x_mask[:, : self.num_water_nodes, :]
+        positions = torch.arange(water.shape[-1], device=water.device).view(1, 1, -1)
+        last_positions = positions.masked_fill(~water_mask.bool(), -1).amax(dim=-1, keepdim=True)
+        gather_positions = last_positions.clamp_min(0)
+        last = water.gather(-1, gather_positions)
+        last = torch.where(last_positions >= 0, last, torch.zeros_like(last))
+        centered = (water - last) * water_mask
         patches = centered.unfold(dimension=-1, size=self.patch_len, step=self.stride)
         patches = patches[:, :, : self.num_patches, :]
         batch_size, nodes, patches_n, patch_len = patches.shape
         encoded = self.patch_encoder(patches.reshape(batch_size * nodes, patches_n, patch_len))
+        encoded = encoded + self.positional_encoding[:, :patches_n]
         encoded = self.encoder(encoded)
         flat = encoded.reshape(batch_size, nodes, patches_n * encoded.shape[-1])
         return self.decoder(flat) + last
@@ -92,6 +99,7 @@ class AnchoredDynamicGraphForecaster(nn.Module):
         graph_gate_bias_init: float = -6.0,
         max_graph_delta_short: float = 0.005,
         max_graph_delta_long: float = 0.035,
+        variant: str = "ours",
     ) -> None:
         super().__init__()
         if num_nodes < 2:
@@ -104,6 +112,15 @@ class AnchoredDynamicGraphForecaster(nn.Module):
         self.horizon = horizon
         self.hidden_dim = hidden_dim
         self.top_k = min(max(1, top_k), num_nodes)
+        valid_variants = {
+            "ours", "no_graph_correction",
+            "no_event_context", "no_correction_bound", "no_event_context_bound",
+            "fixed_graph", "without_neighbor_water", "without_rain",
+            "without_well", "without_pump_gate", "without_nonwater",
+        }
+        if variant not in valid_variants:
+            raise ValueError(f"Unknown anchored forecaster variant: {variant}")
+        self.variant = variant
 
         # This is the only temporal anchor in the released model.
         self.anchor = PatchTSTAnchor(
@@ -173,46 +190,84 @@ class AnchoredDynamicGraphForecaster(nn.Module):
         distance = torch.cdist(self.coords, self.coords, p=2)
         return -F.softplus(self.distance_scale) * distance
 
+    def _excluded_source_types(self) -> set[int]:
+        if self.variant == "without_neighbor_water":
+            return {0}
+        if self.variant == "without_rain":
+            return {1}
+        if self.variant == "without_well":
+            return {2}
+        if self.variant == "without_pump_gate":
+            return {3, 4}
+        if self.variant == "without_nonwater":
+            return {1, 2, 3, 4}
+        return set()
+
     def _dynamic_graph(self, state: torch.Tensor) -> torch.Tensor:
-        query = self.query(state)
-        key = self.key(state)
-        scores = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(self.hidden_dim)
         type_bias = self.type_pair_bias[self.node_type][:, self.node_type]
-        scores = scores + type_bias.unsqueeze(0) + self._distance_bias().unsqueeze(0)
+        if self.variant == "fixed_graph":
+            scores = type_bias.unsqueeze(0) + self._distance_bias().unsqueeze(0)
+            scores = scores.expand(state.shape[0], -1, -1)
+        else:
+            query = self.query(state)
+            key = self.key(state)
+            scores = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(self.hidden_dim)
+            scores = scores + type_bias.unsqueeze(0) + self._distance_bias().unsqueeze(0)
         self_edges = torch.eye(self.num_nodes, device=scores.device, dtype=torch.bool).unsqueeze(0)
         scores = scores.masked_fill(self_edges, -1e9)
+        excluded_types = self._excluded_source_types()
+        source_mask = torch.zeros(self.num_nodes, device=scores.device, dtype=torch.bool)
+        if excluded_types:
+            for type_index in excluded_types:
+                source_mask |= self.node_type == type_index
+            scores = scores.masked_fill(source_mask.view(1, 1, -1), -1e9)
         if self.top_k < self.num_nodes:
             source_indices = torch.topk(scores, k=self.top_k, dim=-1).indices
             retained = torch.zeros_like(scores, dtype=torch.bool)
             retained.scatter_(-1, source_indices, True)
             scores = scores.masked_fill(~retained, -1e9)
-        return torch.softmax(scores, dim=-1)
+        graph = torch.softmax(scores, dim=-1)
+        valid_edges = ~self_edges
+        if excluded_types:
+            valid_edges = valid_edges & ~source_mask.view(1, 1, -1)
+        graph = graph * valid_edges.to(graph.dtype)
+        return graph / graph.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+
+    @staticmethod
+    def _masked_summary(values: torch.Tensor, masks: torch.Tensor, recent_steps: int) -> tuple[torch.Tensor, torch.Tensor]:
+        recent_values = values[:, :, -recent_steps:]
+        recent_masks = masks[:, :, -recent_steps:]
+        magnitude = (recent_values.abs() * recent_masks).sum(dim=(1, 2))
+        magnitude = magnitude / recent_masks.sum(dim=(1, 2)).clamp_min(1.0)
+
+        positions = torch.arange(values.shape[-1], device=values.device).view(1, 1, -1)
+        first_positions = positions.masked_fill(~masks.bool(), values.shape[-1]).amin(dim=-1)
+        last_positions = positions.masked_fill(~masks.bool(), -1).amax(dim=-1)
+        valid_nodes = last_positions >= 0
+        first = values.gather(-1, first_positions.clamp_max(values.shape[-1] - 1).unsqueeze(-1)).squeeze(-1)
+        last = values.gather(-1, last_positions.clamp_min(0).unsqueeze(-1)).squeeze(-1)
+        trend = ((last - first) * valid_nodes).sum(dim=1) / valid_nodes.sum(dim=1).clamp_min(1)
+        return magnitude, trend
 
     def _regime_summary(self, x: torch.Tensor, x_mask: torch.Tensor) -> torch.Tensor:
         features: list[torch.Tensor] = []
+        excluded_types = self._excluded_source_types()
         for type_index in range(5):
             indices = torch.nonzero(self.node_type == type_index, as_tuple=False).flatten()
-            if indices.numel() == 0:
+            if indices.numel() == 0 or type_index in excluded_types:
                 zeros = torch.zeros(x.shape[0], device=x.device, dtype=x.dtype)
                 features.extend([zeros, zeros])
                 continue
             values = x.index_select(1, indices)
             masks = x_mask.index_select(1, indices)
-            recent_steps = min(self.lookback, 24)
-            recent_values = values[:, :, -recent_steps:]
-            recent_masks = masks[:, :, -recent_steps:]
-            magnitude = (recent_values.abs() * recent_masks).sum(dim=(1, 2))
-            magnitude = magnitude / recent_masks.sum(dim=(1, 2)).clamp_min(1.0)
-            endpoint_mask = masks[:, :, -1] * masks[:, :, 0]
-            trend = ((values[:, :, -1] - values[:, :, 0]) * endpoint_mask).sum(dim=1)
-            trend = trend / endpoint_mask.sum(dim=1).clamp_min(1.0)
-            features.extend([magnitude, trend])
+            features.extend(self._masked_summary(values, masks, min(self.lookback, 24)))
         return torch.stack(features, dim=-1)
 
     def _components(self, x: torch.Tensor, x_mask: torch.Tensor) -> dict[str, torch.Tensor]:
         batch_size, num_nodes, lookback = x.shape
         if num_nodes != self.num_nodes or lookback != self.lookback:
             raise ValueError(f"Expected x shape [B,{self.num_nodes},{self.lookback}], got {tuple(x.shape)}")
+        x = x * x_mask
         anchor_prediction = self.anchor(x, x_mask)
         context = self._node_context(batch_size).unsqueeze(2).expand(-1, -1, lookback, -1)
         sequence = torch.stack([x, x_mask], dim=-1)
@@ -225,11 +280,20 @@ class AnchoredDynamicGraphForecaster(nn.Module):
         graph_state = state + self.graph_update(torch.cat([state, message], dim=-1))
         water_state = graph_state[:, : self.num_water_nodes, :]
         regime = self.event_encoder(self._regime_summary(x, x_mask))
+        if self.variant in {"no_event_context", "no_event_context_bound"}:
+            regime = torch.zeros_like(regime)
         regime = regime.unsqueeze(1).expand(-1, self.num_water_nodes, -1)
-        graph_delta = self.correction_budget.to(x.device) * torch.tanh(self.graph_decoder(water_state))
+        raw_delta = self.graph_decoder(water_state)
+        if self.variant in {"no_correction_bound", "no_event_context_bound"}:
+            graph_delta = raw_delta
+        else:
+            graph_delta = self.correction_budget.to(x.device) * torch.tanh(raw_delta)
         gate_input = torch.cat([state[:, : self.num_water_nodes, :], regime], dim=-1)
         gate = torch.sigmoid(self.graph_gate(gate_input))
-        correction = gate * graph_delta
+        if self.variant == "no_graph_correction":
+            correction = torch.zeros_like(graph_delta)
+        else:
+            correction = gate * graph_delta
         return {
             "prediction": anchor_prediction + correction,
             "anchor_prediction": anchor_prediction,

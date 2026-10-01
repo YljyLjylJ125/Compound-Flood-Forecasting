@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -183,6 +185,13 @@ def _load_category_frame(
 
     selected = set(selected_names) if selected_names is not None else None
     station_files = _find_station_files(category_dir)
+    if selected is not None:
+        missing = sorted(selected - set(station_files))
+        if missing:
+            raise FileNotFoundError(
+                f"Official partition references {len(missing)} missing {category} stations in {split}: "
+                + ", ".join(missing[:10])
+            )
     names: List[str] = []
     values: List[np.ndarray] = []
     masks: List[np.ndarray] = []
@@ -190,6 +199,7 @@ def _load_category_frame(
     timestamps: Optional[List[pd.Timestamp]] = None
 
     start, end = pd.to_datetime(phase_dates[0]), pd.to_datetime(phase_dates[1])
+    expected_timestamps = list(pd.date_range(start, end, freq="h"))
     for station_name, (csv_path, json_path) in station_files.items():
         if selected is not None and station_name not in selected:
             continue
@@ -206,10 +216,14 @@ def _load_category_frame(
         confidence = frame.get("CONFIDENCE", pd.Series(np.ones(len(frame), dtype=np.float32)))
         mask = (confidence.astype("float32").to_numpy() > 0).astype("float32")
         current_timestamps = list(frame["TIMESTAMP_"])
+        if current_timestamps != expected_timestamps:
+            raise ValueError(
+                f"Station {station_name} does not match the complete hourly phase grid in {category}/{split}"
+            )
         if timestamps is None:
             timestamps = current_timestamps
-        elif len(current_timestamps) != len(timestamps):
-            raise ValueError(f"Station {station_name} has inconsistent time length in {category}/{split}")
+        elif current_timestamps != timestamps:
+            raise ValueError(f"Station {station_name} has inconsistent timestamps in {category}/{split}")
         names.append(station_name)
         values.append(series)
         masks.append(mask)
@@ -227,7 +241,7 @@ def _load_category_frame(
     )
 
 
-def load_split_arrays(
+def _load_split_arrays_uncached(
     processed_root: Path,
     split: str,
     phase: str,
@@ -251,17 +265,68 @@ def load_split_arrays(
     masks: Dict[str, np.ndarray] = {}
     names: Dict[str, List[str]] = {}
     coords: Dict[str, np.ndarray] = {}
+    reference_timestamps: Optional[List[pd.Timestamp]] = None
     for category in CATEGORIES:
         selected = selected_by_category.get(category)
         if selected is not None and len(list(selected)) == 0:
             continue
-        n, v, m, c, _timestamps = _load_category_frame(
+        n, v, m, c, category_timestamps = _load_category_frame(
             processed_root, split, category, SPLIT_DATES[split][phase], selected
         )
+        if reference_timestamps is None:
+            reference_timestamps = category_timestamps
+        elif category_timestamps != reference_timestamps:
+            raise ValueError(f"Timestamp values differ across categories in {split}/{phase}")
         values[category] = v
         masks[category] = m
         names[category] = n
         coords[category] = c
+    return values, masks, names, coords
+
+
+def load_split_arrays(
+    processed_root: Path,
+    split: str,
+    phase: str,
+    part: Optional[int] = None,
+) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, List[str]], Dict[str, np.ndarray]]:
+    """Load one phase, using a local binary cache after CSV validation.
+
+    A full experiment matrix otherwise reparses the same station CSV files for
+    every seed and model. The cache is stored beside the downloaded data (and
+    is therefore excluded from Git), keyed by split, phase, and spatial part.
+    """
+
+    cache_dir = processed_root.parent / ".cff_cache_v4"
+    part_label = "all" if part is None else str(part)
+    cache_path = cache_dir / f"{split}_{phase}_part_{part_label}.npz"
+    if cache_path.exists():
+        archive = np.load(cache_path, allow_pickle=False)
+        categories = [str(value) for value in archive["categories"].tolist()]
+        values = {category: archive[f"values_{category}"] for category in categories}
+        masks = {category: archive[f"masks_{category}"] for category in categories}
+        names = {category: [str(value) for value in archive[f"names_{category}"].tolist()] for category in categories}
+        coords = {category: archive[f"coords_{category}"] for category in categories}
+        return values, masks, names, coords
+
+    values, masks, names, coords = _load_split_arrays_uncached(processed_root, split, phase, part)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    payload: Dict[str, np.ndarray] = {"categories": np.asarray(list(values), dtype="U16")}
+    for category in values:
+        payload[f"values_{category}"] = values[category]
+        payload[f"masks_{category}"] = masks[category]
+        payload[f"names_{category}"] = np.asarray(names[category], dtype="U128")
+        payload[f"coords_{category}"] = coords[category]
+    # Multiple experiment workers may populate the same cold cache. Publish a
+    # fully written archive atomically so readers never observe a partial zip.
+    with tempfile.NamedTemporaryFile(dir=cache_dir, prefix=cache_path.stem + "_", suffix=".npz", delete=False) as handle:
+        temporary_path = Path(handle.name)
+    try:
+        np.savez(temporary_path, **payload)
+        os.replace(temporary_path, cache_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
     return values, masks, names, coords
 
 
@@ -303,11 +368,16 @@ def fit_metadata(
     eps: float = 1e-6,
 ) -> SFBenchMetadata:
     train_values, train_masks, train_names, train_coords = load_split_arrays(processed_root, split, "train", part)
-    values, _masks, station_names, station_categories, coords, node_type = _concat_by_category(
+    values, masks, station_names, station_categories, coords, node_type = _concat_by_category(
         train_values, train_masks, train_names, train_coords
     )
-    mean = values.mean(axis=1, keepdims=True)
-    std = values.std(axis=1, keepdims=True)
+    # Fit statistics on valid training observations only.  This keeps the
+    # normalization contract aligned with the masked loss and prevents
+    # invalid/interpolated entries from changing the scale of a station.
+    valid_count = np.maximum(masks.sum(axis=1, keepdims=True), 1.0)
+    mean = (values * masks).sum(axis=1, keepdims=True) / valid_count
+    centered = (values - mean) * masks
+    std = np.sqrt((centered * centered).sum(axis=1, keepdims=True) / valid_count)
     std = np.where(std < eps, 1.0, std)
     water_count = train_values["WATER"].shape[0]
     return SFBenchMetadata(
@@ -345,6 +415,7 @@ class SFBenchDataset(Dataset):
         self.part = part
         self.norm_clip = float(norm_clip)
         self.metadata = metadata or fit_metadata(self.processed_root, split, part)
+        phase_start, phase_end = SPLIT_DATES[split][phase]
 
         values_by_cat, masks_by_cat, names_by_cat, coords_by_cat = load_split_arrays(
             self.processed_root, split, phase, part
@@ -362,7 +433,11 @@ class SFBenchDataset(Dataset):
         self.normalized_values = (self.values - self.metadata.mean) / self.metadata.std
         if self.norm_clip > 0:
             self.normalized_values = self.normalized_values.clamp(-self.norm_clip, self.norm_clip)
+        self.normalized_values = self.normalized_values * self.masks
         self.length = self.values.shape[1] - self.lookback - self.span - self.horizon + 1
+        self.timestamps = list(pd.date_range(phase_start, phase_end, freq="h"))
+        if len(self.timestamps) != self.values.shape[1]:
+            raise ValueError("Loaded series length does not match the expected hourly phase range")
         if self.length <= 0:
             raise ValueError("Time window is longer than phase time series.")
 

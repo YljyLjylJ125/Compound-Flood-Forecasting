@@ -167,6 +167,7 @@ def evaluate_episode_windows(
     issue_stride: int = 24,
     min_duration: int = 3,
     merge_gap: int = 6,
+    issue_times: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[dict[str, float], list[dict[str, object]], list[dict[str, object]]]:
     """Evaluate one-to-one episodes on regularly sampled forecast issues."""
 
@@ -194,6 +195,7 @@ def evaluate_episode_windows(
             matches, misses, false_alarms = match_episodes(true_events, pred_events)
             common = {
                 "issue_index": issue_idx,
+                "issue_time": issue_times[issue_idx] if issue_times is not None else "",
                 "node": node,
                 "station": station_names[node],
                 "threshold": threshold,
