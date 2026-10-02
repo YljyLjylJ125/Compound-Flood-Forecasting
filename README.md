@@ -26,8 +26,7 @@ src/anchored_forecaster/    Data, models, metrics, and evaluation code
 tests/                      Fast unit and contract tests
 ```
 
-Large datasets, checkpoints, predictions, and generated result CSV files are
-deliberately excluded from the Git repository. This directory contains only
+ This directory contains
 the original manuscript's model, baseline, ablation, evaluation, and table
 generation code.
 
