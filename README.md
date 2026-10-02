@@ -34,9 +34,7 @@ generation code.
 
 Python 3.8+ and PyTorch 2.0+ are supported.
 
-Package dependencies and optional test dependencies are defined in
-`pyproject.toml`. The SF2Bench download script is provided in
-`scripts/download_data.py`.
+.
 
 The downloader retrieves Harvard Dataverse DOI
 `10.7910/DVN/TU5UXE`, verifies the published archive size and MD5 checksum,
