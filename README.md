@@ -34,18 +34,6 @@ generation code.
 
 Python 3.8+ and PyTorch 2.0+ are supported.
 
-.
-
-The downloader retrieves Harvard Dataverse DOI
-`10.7910/DVN/TU5UXE`, verifies the published archive size and MD5 checksum,
-and extracts the expected layout:
-
-```text
-data/sf2bench/Processed_hour/{WATER,RAIN,WELL,PUMP,GATE}/S_*/<station>/
-```
-
-See [docs/DATA.md](docs/DATA.md) for column semantics and split dates.
-
 ## Train and evaluate
 
 The shared training script supports the proposed model, baselines, and
