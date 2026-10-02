@@ -1,4 +1,5 @@
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+import sys
 
 import torch
 
@@ -85,3 +86,67 @@ def test_masked_values_never_change_predictions():
             baseline = model(x, mask)
             changed = model(perturbed, mask)
         assert torch.allclose(baseline, changed, atol=1e-6), name
+
+
+def test_fair_input_adapters_forward_backward_and_mask_sensitivity():
+    data = fake_data()
+    x = torch.randn(2, 12, 48)
+    mask = torch.ones_like(x)
+    mask[:, 2, -3:] = 0
+    adapted = ["itransformer", "timesnet", "fouriergnn", "mtgnn", "graphwavenet"]
+    for name in adapted:
+        model = build_model(name, data).train()
+        prediction = model(x, mask)
+        assert prediction.shape == (2, 4, 72), name
+        assert torch.isfinite(prediction).all(), name
+        prediction.sum().backward()
+        assert any(parameter.grad is not None for parameter in model.parameters() if parameter.requires_grad), name
+        model.eval()
+        with torch.no_grad():
+            masked_prediction = model(x, mask)
+            unmasked_prediction = model(x, torch.ones_like(mask))
+        assert not torch.allclose(masked_prediction, unmasked_prediction), name
+
+
+def test_fair_input_adapters_use_context_and_metadata():
+    data = fake_data()
+    x = torch.randn(2, 12, 48)
+    mask = torch.ones_like(x)
+    for name in ("itransformer", "timesnet", "fouriergnn", "mtgnn", "graphwavenet"):
+        model = build_model(name, data).eval()
+        with torch.no_grad():
+            baseline = model(x, mask)
+            context_changed = x.clone()
+            context_changed[:, 7, -3:] += 5.0
+            context_prediction = model(context_changed, mask)
+            assert not torch.allclose(baseline, context_prediction), name
+            metadata = model.node_adapter if hasattr(model, "node_adapter") else model
+            metadata.coords[7, 0] += 3.0
+            metadata.type_embedding.weight[1, 0] += 3.0
+            metadata_prediction = model(x, mask)
+        assert not torch.allclose(baseline, metadata_prediction), name
+
+
+def test_autotimes_mask_adapter_without_downloading_backbone(monkeypatch):
+    class TinyBackbone(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(n_embd=16)
+
+        def forward(self, inputs_embeds):
+            return SimpleNamespace(last_hidden_state=inputs_embeds + 0.1)
+
+    transformers = ModuleType("transformers")
+    transformers.GPT2Model = SimpleNamespace(from_pretrained=lambda *args, **kwargs: TinyBackbone())
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    data = fake_data()
+    x = torch.randn(2, 12, 48)
+    mask = torch.ones_like(x)
+    mask[:, 2, -3:] = 0
+    model = build_model("autotimes", data).eval()
+    with torch.no_grad():
+        masked_prediction = model(x, mask)
+        unmasked_prediction = model(x, torch.ones_like(mask))
+    assert masked_prediction.shape == (2, 4, 72)
+    assert torch.isfinite(masked_prediction).all()
+    assert not torch.allclose(masked_prediction, unmasked_prediction)

@@ -25,34 +25,10 @@ from torch.utils.data import DataLoader, Dataset
 
 
 CATEGORIES = ("WATER", "RAIN", "WELL", "PUMP", "GATE")
-SPLITS = ("S_0", "S_1", "S_2", "S_3", "S_4", "S_5", "S_6", "S_7")
+SPLITS = ("S_5", "S_6", "S_7")
+PARTITION_FILE_INDEX = {"S_5": 5, "S_6": 6, "S_7": 7}
 
 SPLIT_DATES: Mapping[str, Mapping[str, Tuple[str, str]]] = {
-    "S_0": {
-        "train": ("1985-01-01 00:00:00", "1987-12-31 23:59:59"),
-        "val": ("1988-01-01 00:00:00", "1988-12-31 23:59:59"),
-        "test": ("1989-01-01 00:00:00", "1989-12-31 23:59:59"),
-    },
-    "S_1": {
-        "train": ("1990-01-01 00:00:00", "1992-12-31 23:59:59"),
-        "val": ("1993-01-01 00:00:00", "1993-12-31 23:59:59"),
-        "test": ("1994-01-01 00:00:00", "1994-12-31 23:59:59"),
-    },
-    "S_2": {
-        "train": ("1995-01-01 00:00:00", "1997-12-31 23:59:59"),
-        "val": ("1998-01-01 00:00:00", "1998-12-31 23:59:59"),
-        "test": ("1999-01-01 00:00:00", "1999-12-31 23:59:59"),
-    },
-    "S_3": {
-        "train": ("2000-01-01 00:00:00", "2002-12-31 23:59:59"),
-        "val": ("2003-01-01 00:00:00", "2003-12-31 23:59:59"),
-        "test": ("2004-01-01 00:00:00", "2004-12-31 23:59:59"),
-    },
-    "S_4": {
-        "train": ("2005-01-01 00:00:00", "2007-12-31 23:59:59"),
-        "val": ("2008-01-01 00:00:00", "2008-12-31 23:59:59"),
-        "test": ("2009-01-01 00:00:00", "2009-12-31 23:59:59"),
-    },
     "S_5": {
         "train": ("2010-01-01 00:00:00", "2012-12-31 23:59:59"),
         "val": ("2013-01-01 00:00:00", "2013-12-31 23:59:59"),
@@ -255,7 +231,7 @@ def _load_split_arrays_uncached(
     selected_by_category: Dict[str, Optional[Iterable[str]]] = {cat: None for cat in CATEGORIES}
     if part is not None:
         part_file = _find_official_aux_file(
-            processed_root, f"threeparts_{part}_map_locations_{SPLITS.index(split)}.json"
+            processed_root, f"threeparts_{part}_map_locations_{PARTITION_FILE_INDEX[split]}.json"
         )
         with part_file.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)

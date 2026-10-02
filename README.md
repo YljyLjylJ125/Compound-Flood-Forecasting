@@ -26,6 +26,11 @@ src/anchored_forecaster/    Data, models, metrics, and evaluation code
 tests/                      Fast unit and contract tests
 ```
 
+Large datasets, checkpoints, predictions, and generated result CSV files are
+deliberately excluded from the Git repository. This directory contains only
+the original manuscript's model, baseline, ablation, evaluation, and table
+generation code.
+
 ## Installation
 
 Python 3.8+ and PyTorch 2.0+ are supported.
@@ -65,7 +70,15 @@ training run.
 The model registry includes all eight paper baselines (`NLinear`, `PatchTST`,
 `iTransformer`, `TimesNet`, `FourierGNN`, `MTGNN`, `AutoTimes`, and Graph
 WaveNet), the proposed model, and the source/architecture ablations reported
-in the paper. 
+in the paper. Architecture hyperparameters are recorded in `configs/models.yaml`.
+
+The complete table-by-table experiment matrix and aggregation rules are in
+[docs/PAPER_EXPERIMENTS.md](docs/PAPER_EXPERIMENTS.md). The release never
+substitutes simulated or placeholder values for experimental results.
+
+The baseline input audit, final input matrix, and minimal fair-input adapters
+are documented in
+[baseline_fair_adaptation_report.md](baseline_fair_adaptation_report.md).
 
 ## Evaluation contract
 
@@ -75,3 +88,15 @@ in the paper.
 - Main high-water thresholds are station-specific training `q=0.95` quantiles.
 - Episodes require three exceedance hours and merge gaps of at most six hours.
 - Forecast issues are sampled every 24 hours for episode evaluation.
+- One run-level row is one model/variant, split, part, repeat, horizon, and quantile.
+
+## Tests
+
+Unit and contract tests are provided in `tests/`. GitHub Actions runs the test
+suite on Python 3.9 and 3.11, including the AutoTimes adapter test with a mock
+backbone.
+
+## Citation
+
+Citation metadata is provided in [CITATION.cff](CITATION.cff). The SF2Bench
+dataset must also be cited according to its Dataverse record.

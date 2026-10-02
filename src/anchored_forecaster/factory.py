@@ -45,15 +45,15 @@ def build_model(name: str, data, hidden_dim: int = 64, top_k: int = 20,
     if name == "itransformer":
         return ITransformer(**common, **metadata, dropout=dropout)
     if name == "timesnet":
-        return TimesNet(**common, dropout=dropout)
+        return TimesNet(**common, **metadata, dropout=dropout)
     if name == "fouriergnn":
-        return FourierGNN(**common)
+        return FourierGNN(**common, **metadata)
     if name == "mtgnn":
-        return MTGNN(**common, dropout=0.3)
+        return MTGNN(**common, **metadata, dropout=0.3)
     if name == "autotimes":
         return AutoTimes(common["num_water_nodes"], common["lookback"], common["horizon"], backbone=autotimes_backbone)
     if name == "graphwavenet":
-        return GraphWaveNet(**common, dropout=0.3)
+        return GraphWaveNet(**common, **metadata, dropout=0.3)
     variant = name if name != "ours" else "ours"
     if variant not in MODEL_NAMES:
         raise ValueError(f"Unknown model {name!r}; choose from {MODEL_NAMES}")

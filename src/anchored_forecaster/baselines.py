@@ -21,15 +21,59 @@ from .models import PatchTSTAnchor
 
 
 BASELINE_CONFIGS: Dict[str, Dict[str, object]] = {
-    "nlinear": {"description": "last-value-centered linear map", "hidden_dim": 0},
-    "patchtst": {"layers": 3, "hidden_dim": 128, "heads": 16, "patch_len": 16, "stride": 8, "revin": True, "dropout": 0.2},
-    "itransformer": {"hidden_dim": 512, "heads": 8, "layers": 2, "ffn_dim": 2048, "dropout": 0.1},
-    "timesnet": {"blocks": 2, "top_periods": 5, "hidden_dim": 32, "inception_kernels": 6, "dropout": 0.1},
-    "fouriergnn": {"spectral_embedding": 256, "hidden_dim": 512, "stages": 3, "sparsity": 0.01},
-    "mtgnn": {"layers": 3, "node_embedding": 40, "residual_channels": 32, "skip_channels": 64, "end_channels": 128, "dropout": 0.3},
-    "autotimes": {"backbone": "frozen-gpt2-base", "token_length": 24, "width": 256, "layers": 2, "dropout": 0.1},
-    "graphwavenet": {"blocks": 4, "dilation_layers": 4, "residual_channels": 32, "skip_channels": 256, "end_channels": 512, "dropout": 0.3},
+    "nlinear": {"description": "last-value-centered linear map", "hidden_dim": 0, "input_adapter": "native WATER mask"},
+    "patchtst": {"layers": 3, "hidden_dim": 128, "heads": 16, "patch_len": 16, "stride": 8, "revin": True, "dropout": 0.2, "input_adapter": "native WATER mask"},
+    "itransformer": {"hidden_dim": 512, "heads": 8, "layers": 2, "ffn_dim": 2048, "dropout": 0.1, "input_adapter": "mask token + type/coordinate token embeddings"},
+    "timesnet": {"blocks": 2, "top_periods": 5, "hidden_dim": 32, "inception_kernels": 6, "dropout": 0.1, "input_adapter": "mask projection + static type/coordinate bias"},
+    "fouriergnn": {"spectral_embedding": 256, "hidden_dim": 512, "stages": 3, "sparsity": 0.01, "input_adapter": "per-node value/mask/type/coordinate projection"},
+    "mtgnn": {"layers": 3, "node_embedding": 40, "residual_channels": 32, "skip_channels": 64, "end_channels": 128, "dropout": 0.3, "input_adapter": "mask/type/coordinate channels before native learned graph"},
+    "autotimes": {"backbone": "frozen-gpt2-base", "token_length": 24, "width": 256, "layers": 2, "dropout": 0.1, "input_adapter": "value + observation-mask token channels"},
+    "graphwavenet": {"blocks": 4, "dilation_layers": 4, "residual_channels": 32, "skip_channels": 256, "end_channels": 512, "dropout": 0.3, "input_adapter": "value/mask/type/coordinate node features"},
 }
+
+
+class _NodeMetadata:
+    """Small shared metadata adapter for multivariate node baselines.
+
+    The adapter only creates per-node static embeddings.  It does not create a
+    new graph, attention block, pooling operation, or temporal interaction.
+    """
+
+    def __init__(self, node_type: torch.Tensor, coords: torch.Tensor, width: int = 4) -> None:
+        self.node_type = node_type.long().clone()
+        coords = coords.float()
+        self.coords = (coords - coords.mean(0, keepdim=True)) / coords.std(0, keepdim=True).clamp_min(1e-6)
+        self.width = width
+
+
+class _NodeInputAdapter(nn.Module):
+    """Per-node value/mask/metadata adapter that preserves the host backbone."""
+
+    def __init__(self, node_type: torch.Tensor, coords: torch.Tensor, width: int = 4) -> None:
+        super().__init__()
+        metadata = _NodeMetadata(node_type, coords, width)
+        self.register_buffer("node_type", metadata.node_type)
+        self.register_buffer("coords", metadata.coords)
+        self.type_embedding = nn.Embedding(5, width)
+        self.coord_projection = nn.Linear(2, width)
+        self.value_mask_projection = nn.Linear(2 + 2 * width, 1)
+
+    @property
+    def parameter_names(self) -> tuple[str, ...]:
+        return ("type_embedding", "coord_projection", "value_mask_projection")
+
+    def static_features(self, batch_size: int, length: int) -> torch.Tensor:
+        static = torch.cat(
+            [self.type_embedding(self.node_type), self.coord_projection(self.coords)], dim=-1
+        )
+        return static.unsqueeze(0).unsqueeze(2).expand(batch_size, -1, length, -1)
+
+    def forward(self, values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        values = values * mask
+        features = torch.cat([values.unsqueeze(-1), mask.unsqueeze(-1), self.static_features(
+            values.shape[0], values.shape[-1]
+        )], dim=-1)
+        return self.value_mask_projection(features).squeeze(-1)
 
 
 class NLinear(nn.Module):
@@ -73,29 +117,37 @@ class PatchTSTBaseline(nn.Module):
         return self.anchor(normalized, x_mask) * std + mean
 
 
-class _TokenForecaster(nn.Module):
-    """Token encoder used by iTransformer and the compact multivariate controls."""
+class ITransformer(nn.Module):
+    """iTransformer over all observed nodes with a small input adapter.
+
+    Variable-token self-attention remains unchanged.  The adapter adds the
+    observation mask and static node metadata to each token embedding.
+    """
 
     def __init__(self, num_nodes: int, num_water_nodes: int, lookback: int, horizon: int,
-                 node_type: torch.Tensor, coords: torch.Tensor, d_model: int = 128,
-                 nhead: int = 8, layers: int = 2, ff_dim: int | None = None,
-                 dropout: float = 0.1, full_info: bool = True) -> None:
+                 d_model: int = 512, nhead: int = 8, layers: int = 2,
+                 ff_dim: int = 2048, dropout: float = 0.1,
+                 node_type: torch.Tensor | None = None,
+                 coords: torch.Tensor | None = None) -> None:
         super().__init__()
         if d_model % nhead:
             raise ValueError("d_model must be divisible by nhead")
         self.num_nodes = num_nodes
         self.num_water_nodes = num_water_nodes
-        self.full_info = full_info
-        self.register_buffer("node_type", node_type.clone().long())
+        self.token = nn.Linear(lookback, d_model)
+        self.mask_token = nn.Linear(lookback, d_model, bias=False)
+        self.type_embedding = nn.Embedding(5, d_model)
+        self.coord_projection = nn.Linear(2, d_model, bias=False)
+        if node_type is None or coords is None:
+            raise ValueError("iTransformer requires node_type and coords for the input adapter")
+        self.register_buffer("node_type", node_type.long().clone())
         coords = coords.float()
-        coords = (coords - coords.mean(0, keepdim=True)) / coords.std(0, keepdim=True).clamp_min(1e-6)
-        self.register_buffer("coords", coords)
-        self.type_embedding = nn.Embedding(5, min(16, d_model // 4))
-        self.coord_embedding = nn.Sequential(nn.Linear(2, min(16, d_model // 4)), nn.GELU())
-        metadata_dim = self.type_embedding.embedding_dim + min(16, d_model // 4)
-        self.token = nn.Linear((2 * lookback + metadata_dim) if full_info else lookback, d_model)
+        self.register_buffer(
+            "coords",
+            (coords - coords.mean(0, keepdim=True)) / coords.std(0, keepdim=True).clamp_min(1e-6),
+        )
         layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, dim_feedforward=ff_dim or d_model * 4,
+            d_model=d_model, nhead=nhead, dim_feedforward=ff_dim,
             dropout=dropout, batch_first=True, activation="gelu",
         )
         self.encoder = nn.TransformerEncoder(layer, num_layers=layers)
@@ -105,41 +157,36 @@ class _TokenForecaster(nn.Module):
         if x_mask is None:
             x_mask = torch.ones_like(x)
         x = x * x_mask
-        batch = x.shape[0]
-        if self.full_info:
-            meta = torch.cat([self.type_embedding(self.node_type), self.coord_embedding(self.coords)], dim=-1)
-            meta = meta.unsqueeze(0).expand(batch, -1, -1)
-            token_input = torch.cat([x, x_mask, meta], dim=-1)
-        else:
-            token_input = x
-        tokens = self.token(token_input)
+        metadata = self.type_embedding(self.node_type) + self.coord_projection(self.coords)
+        tokens = self.token(x) + self.mask_token(x_mask)
+        tokens = tokens + metadata.unsqueeze(0)
         encoded = self.encoder(tokens)
         return self.head(encoded[:, : self.num_water_nodes, :])
 
 
-class ITransformer(_TokenForecaster):
-    """Original value-only iTransformer baseline over the observed network."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        kwargs.setdefault("d_model", 512)
-        kwargs.setdefault("nhead", 8)
-        kwargs.setdefault("layers", 2)
-        kwargs.setdefault("ff_dim", 2048)
-        kwargs.setdefault("full_info", False)
-        super().__init__(*args, **kwargs)
-
-
 class GraphWaveNet(nn.Module):
-    """Graph WaveNet-style adaptive graph and dilated temporal convolution."""
+    """Graph WaveNet with static node-feature input adaptation."""
 
     def __init__(self, num_nodes: int, num_water_nodes: int, lookback: int, horizon: int,
-                 channels: int = 32, dropout: float = 0.3) -> None:
+                 channels: int = 32, dropout: float = 0.3,
+                 node_type: torch.Tensor | None = None,
+                 coords: torch.Tensor | None = None) -> None:
         super().__init__()
         self.num_nodes = num_nodes
         self.num_water_nodes = num_water_nodes
+        if node_type is None or coords is None:
+            raise ValueError("GraphWaveNet requires node_type and coords for the input adapter")
+        self.register_buffer("node_type", node_type.long().clone())
+        coords = coords.float()
+        self.register_buffer(
+            "coords",
+            (coords - coords.mean(0, keepdim=True)) / coords.std(0, keepdim=True).clamp_min(1e-6),
+        )
+        self.type_embedding = nn.Embedding(5, 4)
+        self.coord_projection = nn.Linear(2, 4)
         self.node_a = nn.Parameter(torch.randn(num_nodes, 10) * 0.02)
         self.node_b = nn.Parameter(torch.randn(10, num_nodes) * 0.02)
-        self.input_proj = nn.Conv1d(1, channels, kernel_size=1)
+        self.input_proj = nn.Conv1d(10, channels, kernel_size=1)
         self.temporal = nn.ModuleList()
         self.skip = nn.ModuleList()
         for _block in range(4):
@@ -157,7 +204,9 @@ class GraphWaveNet(nn.Module):
             x_mask = torch.ones_like(x)
         x = x * x_mask
         adjacency = torch.softmax(F.relu(self.node_a @ self.node_b), dim=-1)
-        features = x.unsqueeze(2)
+        static = torch.cat([self.type_embedding(self.node_type), self.coord_projection(self.coords)], dim=-1)
+        static = static.unsqueeze(0).unsqueeze(-1).expand(x.shape[0], -1, -1, x.shape[-1])
+        features = torch.cat([x.unsqueeze(2), x_mask.unsqueeze(2), static], dim=2)
         b, n, c, t = features.shape
         state = self.input_proj(features.reshape(b * n, c, t)).reshape(b, n, -1, t)
         skip_total = None
@@ -210,22 +259,40 @@ class _TimesBlock(nn.Module):
 
 
 class TimesNet(nn.Module):
-    """Two-block, top-five-period TimesNet baseline."""
+    """Two-block TimesNet with a per-input mask/metadata adapter."""
 
     def __init__(self, num_nodes: int, num_water_nodes: int, lookback: int, horizon: int,
-                 hidden_dim: int = 32, blocks: int = 2, dropout: float = 0.1) -> None:
+                 hidden_dim: int = 32, blocks: int = 2, dropout: float = 0.1,
+                 node_type: torch.Tensor | None = None,
+                 coords: torch.Tensor | None = None) -> None:
         super().__init__()
         self.num_water_nodes = num_water_nodes
         self.horizon = horizon
+        if node_type is None or coords is None:
+            raise ValueError("TimesNet requires node_type and coords for the input adapter")
+        self.register_buffer("node_type", node_type.long().clone())
+        coords = coords.float()
+        self.register_buffer(
+            "coords",
+            (coords - coords.mean(0, keepdim=True)) / coords.std(0, keepdim=True).clamp_min(1e-6),
+        )
+        self.type_embedding = nn.Embedding(5, 1)
+        self.coord_projection = nn.Linear(2, 1)
         self.input_projection = nn.Linear(num_nodes, hidden_dim)
+        self.mask_projection = nn.Linear(num_nodes, hidden_dim, bias=False)
         self.blocks = nn.ModuleList([_TimesBlock(hidden_dim, 5, 6, dropout) for _ in range(blocks)])
         self.normalization = nn.LayerNorm(hidden_dim)
         self.head = nn.Linear(hidden_dim * lookback, num_water_nodes * horizon)
 
     def forward(self, x: torch.Tensor, x_mask: torch.Tensor | None = None) -> torch.Tensor:
-        if x_mask is not None:
-            x = x * x_mask
+        if x_mask is None:
+            x_mask = torch.ones_like(x)
+        x = x * x_mask
+        static = self.type_embedding(self.node_type).squeeze(-1) + self.coord_projection(self.coords).squeeze(-1)
+        static = static.unsqueeze(0).unsqueeze(1).expand(x.shape[0], x.shape[-1], -1)
         encoded = self.input_projection(x.transpose(1, 2))
+        encoded = encoded + self.mask_projection(x_mask.transpose(1, 2))
+        encoded = encoded + self.input_projection(static)
         for block in self.blocks:
             encoded = self.normalization(block(encoded))
         return self.head(encoded.flatten(1)).reshape(x.shape[0], self.num_water_nodes, self.horizon)
@@ -242,22 +309,28 @@ class _ComplexLinear(nn.Module):
 
 
 class FourierGNN(nn.Module):
-    """Spectral graph baseline with learned complex frequency mixing."""
+    """Spectral graph baseline with a per-node input adapter."""
 
     def __init__(self, num_nodes: int, num_water_nodes: int, lookback: int, horizon: int,
                  spectral_embedding: int = 256, hidden_dim: int = 512,
-                 stages: int = 3, sparsity: float = 0.01) -> None:
+                 stages: int = 3, sparsity: float = 0.01,
+                 node_type: torch.Tensor | None = None,
+                 coords: torch.Tensor | None = None) -> None:
         super().__init__()
         self.num_water_nodes = num_water_nodes
         self.sparsity = sparsity
+        if node_type is None or coords is None:
+            raise ValueError("FourierGNN requires node_type and coords for the input adapter")
+        self.node_adapter = _NodeInputAdapter(node_type, coords)
         dimensions = [num_nodes, spectral_embedding] + [hidden_dim] * max(0, stages - 2) + [spectral_embedding]
         self.stages = nn.ModuleList([_ComplexLinear(dimensions[index], dimensions[index + 1]) for index in range(len(dimensions) - 1)])
         self.output_projection = _ComplexLinear(spectral_embedding, num_water_nodes)
         self.head = nn.Linear(lookback, horizon)
 
     def forward(self, x: torch.Tensor, x_mask: torch.Tensor | None = None) -> torch.Tensor:
-        if x_mask is not None:
-            x = x * x_mask
+        if x_mask is None:
+            x_mask = torch.ones_like(x)
+        x = self.node_adapter(x, x_mask)
         spectrum = torch.fft.rfft(x, dim=-1).transpose(1, 2)
         for stage in self.stages:
             spectrum = stage(spectrum)
@@ -269,13 +342,25 @@ class FourierGNN(nn.Module):
 
 
 class MTGNN(nn.Module):
-    """Learned-graph temporal convolution baseline."""
+    """Learned-graph temporal convolution with static node features."""
 
     def __init__(self, num_nodes: int, num_water_nodes: int, lookback: int, horizon: int,
-                 layers: int = 3, residual_channels: int = 32, dropout: float = 0.3) -> None:
+                 layers: int = 3, residual_channels: int = 32, dropout: float = 0.3,
+                 node_type: torch.Tensor | None = None,
+                 coords: torch.Tensor | None = None) -> None:
         super().__init__()
         self.num_water_nodes = num_water_nodes
         self.horizon = horizon
+        if node_type is None or coords is None:
+            raise ValueError("MTGNN requires node_type and coords for the input adapter")
+        self.register_buffer("node_type", node_type.long().clone())
+        coords = coords.float()
+        self.register_buffer(
+            "coords",
+            (coords - coords.mean(0, keepdim=True)) / coords.std(0, keepdim=True).clamp_min(1e-6),
+        )
+        self.type_embedding = nn.Embedding(5, 4)
+        self.coord_projection = nn.Linear(2, 4)
         self.node_a = nn.Parameter(torch.randn(num_nodes, 40) * 0.02)
         self.node_b = nn.Parameter(torch.randn(40, num_nodes) * 0.02)
         self.temporal = nn.ModuleList()
@@ -284,17 +369,23 @@ class MTGNN(nn.Module):
             dilation = 2 ** layer
             self.temporal.append(nn.Conv1d(residual_channels, residual_channels * 2, 3, dilation=dilation))
             self.skip.append(nn.Conv1d(residual_channels, 64, 1))
-        self.input_projection = nn.Conv1d(1, residual_channels, 1)
+        self.input_projection = nn.Conv1d(10, residual_channels, 1)
         self.end = nn.Sequential(nn.ReLU(), nn.Conv1d(64, 128, 1), nn.ReLU(), nn.Conv1d(128, horizon, 1))
         self.dropout = dropout
 
     def forward(self, x: torch.Tensor, x_mask: torch.Tensor | None = None) -> torch.Tensor:
-        if x_mask is not None:
-            x = x * x_mask
+        if x_mask is None:
+            x_mask = torch.ones_like(x)
+        x = x * x_mask
         adjacency = torch.softmax(F.relu(self.node_a @ self.node_b), dim=-1)
         x = torch.einsum("ij,bjt->bit", adjacency, x)
+        x_mask = torch.einsum("ij,bjt->bit", adjacency, x_mask)
         b, n, l = x.shape
-        state = self.input_projection(x.reshape(b * n, 1, l)).reshape(b, n, -1, l)
+        static = torch.cat([self.type_embedding(self.node_type), self.coord_projection(self.coords)], dim=-1)
+        static = static.unsqueeze(0).unsqueeze(-1).expand(b, -1, -1, l)
+        static = torch.einsum("ij,bjct->bict", adjacency, static)
+        features = torch.cat([x.unsqueeze(2), x_mask.unsqueeze(2), static], dim=2)
+        state = self.input_projection(features.reshape(b * n, 10, l)).reshape(b, n, -1, l)
         skip_total = None
         for convolution, skip in zip(self.temporal, self.skip):
             dilation = convolution.dilation[0]
@@ -329,19 +420,27 @@ class AutoTimes(nn.Module):
         for parameter in self.backbone.parameters():
             parameter.requires_grad = False
         embed_dim = self.backbone.config.n_embd
-        self.encoder = nn.Sequential(nn.Linear(token_length, width), nn.GELU(), nn.Dropout(dropout), nn.Linear(width, embed_dim))
+        # A two-channel token adapter exposes the observation mask without
+        # changing the frozen GPT-2 backbone or its temporal tokenization.
+        self.encoder = nn.Sequential(nn.Linear(2 * token_length, width), nn.GELU(), nn.Dropout(dropout), nn.Linear(width, embed_dim))
         tokens = math.ceil(lookback / token_length)
         self.decoder = nn.Sequential(nn.Linear(tokens * embed_dim, width), nn.GELU(), nn.Dropout(dropout), nn.Linear(width, horizon))
 
     def forward(self, x: torch.Tensor, x_mask: torch.Tensor | None = None) -> torch.Tensor:
         if x_mask is not None:
             x = x * x_mask
+        else:
+            x_mask = torch.ones_like(x)
         water = x[:, : self.num_water_nodes]
+        water_mask = x_mask[:, : self.num_water_nodes]
         b, n, l = water.shape
         pad = (-l) % self.token_length
         if pad:
             water = F.pad(water, (pad, 0))
+            water_mask = F.pad(water_mask, (pad, 0))
         tokens = water.unfold(-1, self.token_length, self.token_length)
+        mask_tokens = water_mask.unfold(-1, self.token_length, self.token_length)
+        tokens = torch.cat([tokens, mask_tokens], dim=-1)
         embeddings = self.encoder(tokens).reshape(b * n, tokens.shape[2], -1)
         encoded = self.backbone(inputs_embeds=embeddings).last_hidden_state
         return self.decoder(encoded.reshape(b, n, -1))
