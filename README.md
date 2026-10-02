@@ -43,8 +43,6 @@ repeat identifier, and forecast horizon.
 
 The output contains the lowest-validation-MSE checkpoint, training history,
 original-unit predictions, run-level metrics, and episode match records.
-The resumable manuscript matrix writes to `artifacts/paper_reproduction/` by
-default.
 
 The evaluation script assesses saved checkpoints using the same data
 boundaries, spatial partition, and forecast horizon as the corresponding
