@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the manuscript main comparison and S7/3D ablation matrix."""
+"""Run model comparisons and S7/3D ablation experiments."""
 
 from __future__ import annotations
 
@@ -177,7 +177,7 @@ def main() -> None:
             run for run in selected
             if args.rerun or not complete(args.artifact_root / run.relative_dir)
         ][:args.max_runs]
-    print(f"Selected {len(selected)} paper-reproduction runs", flush=True)
+    print(f"Selected {len(selected)} experiment runs", flush=True)
     if args.list:
         for run in selected:
             print(run)

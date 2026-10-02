@@ -3,7 +3,7 @@
 /data/sf2bench/
 /data/SF2Bench/
 
-# Experiment artifacts and result exports are released separately
+# Generated experiment artifacts and result exports
 /artifacts/
 /results/
 *.pt

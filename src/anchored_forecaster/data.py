@@ -119,8 +119,7 @@ def _read_station_location(json_path: Path) -> Tuple[float, float]:
 
 
 def _find_official_aux_file(processed_root: Path, filename: str) -> Path:
-    # The release ships the official three-part station maps separately from
-    # the large data archive so they remain versioned with the code.
+    # Official spatial partition maps are stored in data/partitions.
     release_root = Path(__file__).resolve().parents[2]
     candidates = [
         processed_root / filename,
@@ -133,7 +132,7 @@ def _find_official_aux_file(processed_root: Path, filename: str) -> Path:
             return candidate
     raise FileNotFoundError(
         f"Missing official SFBench auxiliary file {filename!r}. "
-        "Checked the data root and this release's data/partitions directory."
+        "Checked the data root and the repository's data/partitions directory."
     )
 
 

@@ -1,4 +1,4 @@
-"""Code release for anchored dynamic-graph high-water forecasting."""
+"""Anchored dynamic-graph high-water forecasting."""
 
 from .data import CATEGORIES, SFBenchDataModule, parse_duration
 from .factory import MODEL_NAMES, active_parameter_count, build_model, trainable_parameter_count

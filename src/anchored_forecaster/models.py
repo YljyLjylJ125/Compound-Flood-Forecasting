@@ -122,7 +122,7 @@ class AnchoredDynamicGraphForecaster(nn.Module):
             raise ValueError(f"Unknown anchored forecaster variant: {variant}")
         self.variant = variant
 
-        # This is the only temporal anchor in the released model.
+        # Target WATER histories provide the temporal anchor.
         self.anchor = PatchTSTAnchor(
             num_water_nodes=num_water_nodes,
             lookback=lookback,

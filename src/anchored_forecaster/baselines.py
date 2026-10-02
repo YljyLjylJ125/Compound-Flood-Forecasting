@@ -1,11 +1,8 @@
-"""Dependency-light implementations of the paper's comparison models.
+"""Baseline models for WATER-stage forecasting.
 
-The release intentionally keeps the baselines in PyTorch instead of pulling in
-large third-party forecasting frameworks.  Each class accepts the same
-``[batch, nodes, lookback]`` tensor as the proposed model and returns forecasts
-for WATER nodes only.  The architecture settings in ``BASELINE_CONFIGS`` are
-recorded separately from the compact implementations so experiments remain
-auditable and easy to replace with the original upstream implementations.
+Each model accepts a ``[batch, nodes, lookback]`` tensor and an observation
+mask, and returns forecasts for WATER nodes. Architecture settings and input
+adapter descriptions are defined in ``BASELINE_CONFIGS``.
 """
 
 from __future__ import annotations
@@ -33,11 +30,7 @@ BASELINE_CONFIGS: Dict[str, Dict[str, object]] = {
 
 
 class _NodeMetadata:
-    """Small shared metadata adapter for multivariate node baselines.
-
-    The adapter only creates per-node static embeddings.  It does not create a
-    new graph, attention block, pooling operation, or temporal interaction.
-    """
+    """Static per-node metadata for multivariate baselines."""
 
     def __init__(self, node_type: torch.Tensor, coords: torch.Tensor, width: int = 4) -> None:
         self.node_type = node_type.long().clone()
@@ -47,7 +40,7 @@ class _NodeMetadata:
 
 
 class _NodeInputAdapter(nn.Module):
-    """Per-node value/mask/metadata adapter that preserves the host backbone."""
+    """Project per-node values, observation masks, and static metadata."""
 
     def __init__(self, node_type: torch.Tensor, coords: torch.Tensor, width: int = 4) -> None:
         super().__init__()
@@ -95,7 +88,7 @@ class NLinear(nn.Module):
 
 
 class PatchTSTBaseline(nn.Module):
-    """Paper-sized PatchTST adapter using the shared channel-independent core."""
+    """Channel-independent PatchTST with masked normalization."""
 
     def __init__(self, num_water_nodes: int, lookback: int, horizon: int, dropout: float = 0.2) -> None:
         super().__init__()
@@ -118,11 +111,7 @@ class PatchTSTBaseline(nn.Module):
 
 
 class ITransformer(nn.Module):
-    """iTransformer over all observed nodes with a small input adapter.
-
-    Variable-token self-attention remains unchanged.  The adapter adds the
-    observation mask and static node metadata to each token embedding.
-    """
+    """iTransformer with value, observation-mask, and node-metadata embeddings."""
 
     def __init__(self, num_nodes: int, num_water_nodes: int, lookback: int, horizon: int,
                  d_model: int = 512, nhead: int = 8, layers: int = 2,
@@ -420,8 +409,7 @@ class AutoTimes(nn.Module):
         for parameter in self.backbone.parameters():
             parameter.requires_grad = False
         embed_dim = self.backbone.config.n_embd
-        # A two-channel token adapter exposes the observation mask without
-        # changing the frozen GPT-2 backbone or its temporal tokenization.
+        # Encode values and observation masks into GPT-2 input embeddings.
         self.encoder = nn.Sequential(nn.Linear(2 * token_length, width), nn.GELU(), nn.Dropout(dropout), nn.Linear(width, embed_dim))
         tokens = math.ceil(lookback / token_length)
         self.decoder = nn.Sequential(nn.Linear(tokens * embed_dim, width), nn.GELU(), nn.Dropout(dropout), nn.Linear(width, horizon))

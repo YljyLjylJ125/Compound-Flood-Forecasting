@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate manuscript main, split-specific, and ablation result tables."""
+"""Generate comparison, split-specific, and ablation result tables."""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def split_results(runs: pd.DataFrame) -> pd.DataFrame:
 
 
 def main_results(split_table: pd.DataFrame) -> pd.DataFrame:
-    """Reproduce Tables 1--3 by averaging the S5/S6/S7 table statistics."""
+    """Aggregate S5/S6/S7 statistics for Tables 1--3."""
 
     main = split_table[split_table["variant"].isin(PAPER_MODELS)]
     result = (
@@ -133,7 +133,7 @@ def main() -> None:
     split_table.to_csv(args.output_dir / "tables_8_10_split_results.csv", index=False)
     main_results(split_table).to_csv(args.output_dir / "tables_1_3_main_results.csv", index=False)
     ablation_results(split_table).to_csv(args.output_dir / "figure_4_ablation.csv", index=False)
-    print(f"Wrote manuscript tables from {len(runs)} completed runs")
+    print(f"Wrote result tables from {len(runs)} runs")
 
 
 if __name__ == "__main__":

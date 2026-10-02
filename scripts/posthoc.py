@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompute the manuscript S7/3D threshold-sensitivity experiment."""
+"""Evaluate high-water threshold sensitivity on S7/3D predictions."""
 
 from __future__ import annotations
 

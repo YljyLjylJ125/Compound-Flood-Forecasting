@@ -15,7 +15,6 @@ magnitude is state- and lead-dependent and explicitly bounded.
 ```text
 configs/                    Paper protocol and model configurations
 data/partitions/            Official three-part station maps
-docs/                       Data, model, and reproduction details
 scripts/download_data.py    Verified SF2Bench downloader
 scripts/train.py            Shared trainer for all models and variants
 scripts/evaluate.py         Checkpoint and prediction evaluation
@@ -26,8 +25,7 @@ src/anchored_forecaster/    Data, models, metrics, and evaluation code
 tests/                      Fast unit and contract tests
 ```
 
- This directory contains
-the original manuscript's model, baseline, ablation, evaluation, and table
+This repository contains model, baseline, ablation, evaluation, and result-table
 generation code.
 
 ## Installation
@@ -64,5 +62,4 @@ in the paper.
 - Episodes require three exceedance hours and merge gaps of at most six hours.
 - Forecast issues are sampled every 24 hours for episode evaluation.
 - One run-level row is one model/variant, split, part, repeat, horizon, and quantile.
-
 

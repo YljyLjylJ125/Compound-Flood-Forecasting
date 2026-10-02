@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate any released checkpoint without retraining."""
+"""Evaluate saved model checkpoints."""
 
 from __future__ import annotations
 
