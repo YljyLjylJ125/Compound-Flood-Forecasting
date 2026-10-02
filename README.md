@@ -65,13 +65,4 @@ in the paper.
 - Forecast issues are sampled every 24 hours for episode evaluation.
 - One run-level row is one model/variant, split, part, repeat, horizon, and quantile.
 
-## Tests
 
-Unit and contract tests are provided in `tests/`. GitHub Actions runs the test
-suite on Python 3.9 and 3.11, including the AutoTimes adapter test with a mock
-backbone.
-
-## Citation
-
-Citation metadata is provided in [CITATION.cff](CITATION.cff). The SF2Bench
-dataset must also be cited according to its Dataverse record.
