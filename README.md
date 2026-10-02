@@ -53,14 +53,7 @@ training run.
 The model registry includes all eight paper baselines (`NLinear`, `PatchTST`,
 `iTransformer`, `TimesNet`, `FourierGNN`, `MTGNN`, `AutoTimes`, and Graph
 WaveNet), the proposed model, and the source/architecture ablations reported
-in the paper. Architecture hyperparameters are recorded in `configs/models.yaml`.
-
-The complete table-by-table experiment matrix and aggregation rules are in
-[docs/PAPER_EXPERIMENTS.md](docs/PAPER_EXPERIMENTS.md). 
-
-The baseline input audit, final input matrix, and minimal fair-input adapters
-are documented in
-[baseline_fair_adaptation_report.md](baseline_fair_adaptation_report.md).
+in the paper. 
 
 ## Evaluation contract
 
